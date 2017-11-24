@@ -71,6 +71,9 @@ vc4_job_free(struct vc4_context *vc4, struct vc4_job *job)
         if (vc4->job == job)
                 vc4->job = NULL;
 
+        if (job->perfmon)
+                job->perfmon->pendingjobs--;
+
         ralloc_free(job);
 }
 
@@ -89,6 +92,11 @@ vc4_job_create(struct vc4_context *vc4)
         job->draw_min_y = ~0;
         job->draw_max_x = 0;
         job->draw_max_y = 0;
+
+        if (vc4->perfmon) {
+                job->perfmon = vc4->perfmon;
+                vc4->perfmon->pendingjobs++;
+	}
 
         return job;
 }
@@ -453,6 +461,8 @@ vc4_job_submit(struct vc4_context *vc4, struct vc4_job *job)
         submit.shader_rec_count = job->shader_rec_count;
         submit.uniforms = (uintptr_t)job->uniforms.base;
         submit.uniforms_size = cl_offset(&job->uniforms);
+	if (job->perfmon)
+		submit.perfmonid = job->perfmon->id;
 
         assert(job->draw_min_x != ~0 && job->draw_min_y != ~0);
         submit.min_x_tile = job->draw_min_x / job->tile_width;
@@ -485,6 +495,8 @@ vc4_job_submit(struct vc4_context *vc4, struct vc4_job *job)
                         warned = true;
                 } else if (!ret) {
                         vc4->last_emit_seqno = submit.seqno;
+                        if (job->perfmon)
+                                job->perfmon->last_seqno = submit.seqno;
                 }
         }
 
