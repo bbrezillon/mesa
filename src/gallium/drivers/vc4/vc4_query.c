@@ -218,6 +218,10 @@ vc4_begin_query(struct pipe_context *pctx, struct pipe_query *pquery)
 
         query->hwperfmon->id = req.id;
 
+        /* Make sure all pendings jobs are flushed before activating the
+         * perfmon.
+         */
+        vc4_flush(pctx);
         ctx->perfmon = query->hwperfmon;
         return true;
 }
@@ -234,6 +238,10 @@ vc4_end_query(struct pipe_context *pctx, struct pipe_query *pquery)
         if (ctx->perfmon != query->hwperfmon)
                 return false;
 
+        /* Make sure all pendings jobs are flushed before deactivating the
+         * perfmon.
+         */
+        vc4_flush(pctx);
         ctx->perfmon = NULL;
         return true;
 }
@@ -251,13 +259,6 @@ vc4_get_query_result(struct pipe_context *pctx, struct pipe_query *pquery,
         if (!query->hwperfmon) {
                 vresult->u64 = 0;
                 return true;
-        }
-
-        if (query->hwperfmon->pendingjobs) {
-                if (!wait)
-                        return false;
-
-                vc4_flush(pctx);
         }
 
         if (!vc4_wait_seqno(ctx->screen, query->hwperfmon->last_seqno,

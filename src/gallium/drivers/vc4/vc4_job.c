@@ -71,9 +71,6 @@ vc4_job_free(struct vc4_context *vc4, struct vc4_job *job)
         if (vc4->job == job)
                 vc4->job = NULL;
 
-        if (job->perfmon)
-                job->perfmon->pendingjobs--;
-
         ralloc_free(job);
 }
 
@@ -93,10 +90,8 @@ vc4_job_create(struct vc4_context *vc4)
         job->draw_max_x = 0;
         job->draw_max_y = 0;
 
-        if (vc4->perfmon) {
+        if (vc4->perfmon)
                 job->perfmon = vc4->perfmon;
-                vc4->perfmon->pendingjobs++;
-	}
 
         return job;
 }

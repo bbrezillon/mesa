@@ -221,7 +221,6 @@ struct vc4_job_key {
 
 struct vc4_hwperfmon {
         uint32_t id;
-        uint32_t pendingjobs;
         uint64_t last_seqno;
         uint8_t events[DRM_VC4_MAX_PERF_COUNTERS];
         uint64_t counters[DRM_VC4_MAX_PERF_COUNTERS];
