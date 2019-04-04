@@ -46,6 +46,7 @@
 
 #include "pan_screen.h"
 #include "pan_resource.h"
+#include "pan_perfcnt.h"
 #include "pan_public.h"
 #include "pan_util.h"
 
@@ -499,9 +500,12 @@ panfrost_is_format_supported( struct pipe_screen *screen,
 
 
 static void
-panfrost_destroy_screen( struct pipe_screen *screen )
+panfrost_destroy_screen(struct pipe_screen *pscreen)
 {
-        FREE(screen);
+	struct panfrost_screen *screen = pan_screen(pscreen);
+
+	panfrost_perfcnt_cleanup(screen);
+	FREE(screen);
 }
 
 static void
@@ -601,6 +605,7 @@ panfrost_create_screen(int fd, struct renderonly *ro)
 	screen->last_fragment_flushed = true;
 
         panfrost_resource_screen_init(screen);
+	panfrost_perfcnt_init(screen);
 
         return &screen->base;
 }

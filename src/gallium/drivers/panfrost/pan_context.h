@@ -73,13 +73,20 @@ struct panfrost_constant_buffer {
         void *buffer;
 };
 
+struct panfrost_perfcnt_query {
+	unsigned int ncounters;
+	unsigned int *counters;
+	void *driver_data;
+};
+
 struct panfrost_query {
         /* Passthrough from Gallium */
         unsigned type;
         unsigned index;
 
         /* Memory for the GPU to writeback the value of the query */
-        struct panfrost_transfer transfer;
+	struct panfrost_transfer transfer;
+	struct panfrost_perfcnt_query perfcnt;
 };
 
 struct panfrost_fence {

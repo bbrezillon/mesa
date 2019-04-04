@@ -40,6 +40,7 @@
 struct panfrost_context;
 struct panfrost_resource;
 struct panfrost_screen;
+struct panfrost_perfcnt_query;
 
 /* Flags for allocated memory */
 #define PAN_ALLOCATE_EXECUTE (1 << 0)
@@ -76,6 +77,45 @@ struct panfrost_driver {
                       struct pipe_context *ctx,
                       struct pipe_fence_handle *fence,
                       uint64_t timeout);
+	void (*init_perfcnt) (struct panfrost_screen *screen);
+	boolean (*create_perfcnt_query) (struct panfrost_context *ctx,
+					 struct panfrost_perfcnt_query *q);
+	void (*destroy_perfcnt_query) (struct panfrost_context *ctx,
+				       struct panfrost_perfcnt_query *q);
+	boolean (*begin_perfcnt_query) (struct panfrost_context *ctx,
+					struct panfrost_perfcnt_query *q);
+	boolean (*end_perfcnt_query) (struct panfrost_context *ctx,
+				      struct panfrost_perfcnt_query *q);
+	boolean (*get_perfcnt_results) (struct panfrost_context *ctx,
+					struct panfrost_perfcnt_query *q,
+					boolean wait,
+					union pipe_query_result *vresults);
+};
+
+struct panfrost_counter {
+	unsigned int id;
+	const char *name;
+};
+
+struct panfrost_counters {
+	struct {
+		unsigned int ncounters;
+		struct panfrost_counter *counters;
+	} block[4];
+};
+
+struct panfrost_perfcnt_query_info {
+	const char *name;
+	uint8_t block;
+	uint8_t instance;
+	uint8_t counter;
+};
+
+struct panfrost_perfcnt_info {
+	const struct panfrost_counters *counters;
+	uint64_t instances[4];
+	unsigned int nqueries;
+	struct panfrost_perfcnt_query_info *queries;
 };
 
 struct panfrost_screen {
@@ -83,6 +123,7 @@ struct panfrost_screen {
 
         struct renderonly *ro;
         struct panfrost_driver *driver;
+	struct panfrost_perfcnt_info perfcnt_info;
 
         struct panfrost_memory perf_counters;
 

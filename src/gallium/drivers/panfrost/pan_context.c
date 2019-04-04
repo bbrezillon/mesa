@@ -2323,17 +2323,76 @@ panfrost_create_query(struct pipe_context *pipe,
         return (struct pipe_query *) q;
 }
 
+static struct pipe_query *
+panfrost_create_batch_query(struct pipe_context *pipe, unsigned num_queries,
+			    unsigned *query_types)
+{
+	struct panfrost_screen *screen = pan_screen(pipe->screen);
+	struct panfrost_context *ctx = pan_context(pipe);
+	struct panfrost_query *query;
+	unsigned i, nhwqueries = 0;
+
+	if (!screen->driver->create_perfcnt_query)
+		return NULL;
+
+	query = CALLOC_STRUCT(panfrost_query);
+	if (!query)
+		return NULL;
+
+	query->type = PIPE_QUERY_DRIVER_SPECIFIC;
+
+	for (i = 0; i < num_queries; i++) {
+		if (query_types[i] >= PIPE_QUERY_DRIVER_SPECIFIC)
+			nhwqueries++;
+	}
+
+	if (!nhwqueries || nhwqueries != num_queries)
+		goto err_free_query;
+
+	query->perfcnt.ncounters = num_queries;
+	query->perfcnt.counters = CALLOC(num_queries, sizeof(*query->perfcnt.counters));
+	if (!query->perfcnt.counters)
+		goto err_free_query;
+
+	for (i = 0; i < num_queries; i++)
+		query->perfcnt.counters[i] = query_types[i] - PIPE_QUERY_DRIVER_SPECIFIC;
+
+	if (!screen->driver->create_perfcnt_query(ctx, &query->perfcnt))
+		goto err_free_query;
+
+	return (struct pipe_query *)query;
+
+err_free_query:
+	if (query->perfcnt.counters)
+		free(query->perfcnt.counters);
+
+	free(query);
+	return NULL;
+}
+
 static void
 panfrost_destroy_query(struct pipe_context *pipe, struct pipe_query *q)
 {
+	struct panfrost_screen *screen = pan_screen(pipe->screen);
+	struct panfrost_context *ctx = pan_context(pipe);
+	struct panfrost_query *query = (struct panfrost_query *)q;
+
+	if (query->type == PIPE_QUERY_DRIVER_SPECIFIC &&
+	    screen->driver->destroy_perfcnt_query)
+		screen->driver->destroy_perfcnt_query(ctx, &query->perfcnt);
+
         FREE(q);
 }
 
 static boolean
 panfrost_begin_query(struct pipe_context *pipe, struct pipe_query *q)
 {
-        struct panfrost_context *ctx = pan_context(pipe);
-        struct panfrost_query *query = (struct panfrost_query *) q;
+	struct panfrost_screen *screen = pan_screen(pipe->screen);
+	struct panfrost_context *ctx = pan_context(pipe);
+	struct panfrost_query *query = (struct panfrost_query *)q;
+
+	if (query->type == PIPE_QUERY_DRIVER_SPECIFIC)
+		return screen->driver->begin_perfcnt_query(ctx, &query->perfcnt);
 
         switch (query->type) {
                 case PIPE_QUERY_OCCLUSION_COUNTER:
@@ -2359,8 +2418,14 @@ panfrost_begin_query(struct pipe_context *pipe, struct pipe_query *q)
 static bool
 panfrost_end_query(struct pipe_context *pipe, struct pipe_query *q)
 {
+	struct panfrost_screen *screen = pan_screen(pipe->screen);
+        struct panfrost_query *query = (struct panfrost_query *)q;
         struct panfrost_context *ctx = pan_context(pipe);
-        ctx->occlusion_query = NULL;
+
+	if (query->type == PIPE_QUERY_DRIVER_SPECIFIC)
+		return screen->driver->end_perfcnt_query(ctx, &query->perfcnt);
+
+	ctx->occlusion_query = NULL;
         return true;
 }
 
@@ -2371,12 +2436,18 @@ panfrost_get_query_result(struct pipe_context *pipe,
                           union pipe_query_result *vresult)
 {
         /* STUB */
-        struct panfrost_query *query = (struct panfrost_query *) q;
+        struct panfrost_query *query = (struct panfrost_query *)q;
+	struct panfrost_screen *screen = pan_screen(pipe->screen);
+        struct panfrost_context *ctx = pan_context(pipe);
 
         /* We need to flush out the jobs to actually run the counter, TODO
          * check wait, TODO wallpaper after if needed */
 
         panfrost_flush(pipe, NULL, PIPE_FLUSH_END_OF_FRAME);
+
+	if (query->type == PIPE_QUERY_DRIVER_SPECIFIC)
+		return screen->driver->get_perfcnt_results(ctx, &query->perfcnt,
+							   wait, vresult);
 
         switch (query->type) {
                 case PIPE_QUERY_OCCLUSION_COUNTER:
@@ -2541,6 +2612,7 @@ panfrost_create_context(struct pipe_screen *screen, void *priv, unsigned flags)
         gallium->set_active_query_state = panfrost_set_active_query_state;
 
         gallium->create_query = panfrost_create_query;
+	gallium->create_batch_query = panfrost_create_batch_query;
         gallium->destroy_query = panfrost_destroy_query;
         gallium->begin_query = panfrost_begin_query;
         gallium->end_query = panfrost_end_query;
