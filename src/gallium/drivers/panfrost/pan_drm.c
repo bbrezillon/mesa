@@ -39,6 +39,8 @@
 struct panfrost_drm {
 	struct panfrost_driver base;
 	int fd;
+	uint32_t nperfmons;
+	uint32_t *perfmons;
 };
 
 static void
@@ -232,6 +234,8 @@ panfrost_drm_submit_job(struct panfrost_context *ctx, u64 job_desc, int reqs, st
 	bo_handles[submit.bo_handle_count++] = ctx->varying_mem.gem_handle;
 	bo_handles[submit.bo_handle_count++] = ctx->misc_0.gem_handle;
 	submit.bo_handles = (u64)bo_handles;
+	submit.perfmon_handles = (u64)drm->perfmons;
+	submit.perfmon_handle_count = drm->nperfmons;
 
         /* Dump memory _before_ submitting so we're not corrupted with actual GPU results */
         pantrace_dump_memory();
@@ -399,6 +403,241 @@ panfrost_drm_fence_finish(struct pipe_screen *pscreen,
         return ret >= 0;
 }
 
+static void panfrost_drm_init_perfcnt(struct panfrost_screen *screen)
+{
+	struct panfrost_drm *drm = (struct panfrost_drm *)screen->driver;
+	struct drm_panfrost_get_perfcnt_layout get_layout = { };
+	const struct panfrost_counters *counters;
+	unsigned int i, j;
+	int ret;
+
+        ret = drmIoctl(drm->fd, DRM_IOCTL_PANFROST_GET_PERFCNT_LAYOUT,
+		       &get_layout);
+        if (ret)
+		return;
+
+	counters = screen->perfcnt_info.counters;
+	for (i = 0; i < PANFROST_NUM_BLOCKS; i++) {
+		for (j = 0; j < counters->block[i].ncounters; j++) {
+			uint8_t id = counters->block[i].counters[j].id;
+
+			assert((1ULL << id) & get_layout.counters[i].counters);
+		}
+
+		screen->perfcnt_info.instances[i] = get_layout.counters[i].instances;
+	}
+}
+
+struct pandrost_drm_perfcnt_query {
+	uint32_t perfmon_handle;
+	struct drm_panfrost_block_perfcounters conf[PANFROST_NUM_BLOCKS];
+	uint32_t *buffers[PANFROST_NUM_BLOCKS];
+};
+
+static boolean
+panfrost_drm_create_perfcnt_query(struct panfrost_context *ctx,
+				  struct panfrost_perfcnt_query *query)
+{
+	struct panfrost_screen *screen = pan_screen(ctx->base.screen);
+	struct panfrost_drm *drm = (struct panfrost_drm *)screen->driver;
+	struct drm_panfrost_create_perfmon create_perfmon = { };
+	unsigned int ncounters[PANFROST_NUM_BLOCKS] = { };
+	unsigned int ninstances[PANFROST_NUM_BLOCKS] = { };
+	struct panfrost_perfcnt_query_info *qinfo;
+	struct pandrost_drm_perfcnt_query *data;
+	const struct panfrost_counters *counters;
+	unsigned int i;
+	int ret;
+
+
+	data = CALLOC_STRUCT(pandrost_drm_perfcnt_query);
+	if (!data)
+		return false;
+
+	counters = screen->perfcnt_info.counters;
+	for (i = 0; i < query->ncounters; i++) {
+		unsigned int counterid;
+
+		qinfo = &screen->perfcnt_info.queries[query->counters[i]];
+		counterid = counters->block[qinfo->block].counters[qinfo->counter].id;
+		if (!((1ULL << counterid) & data->conf[qinfo->block].counters)) {
+			data->conf[qinfo->block].counters |= 1ULL << counterid;
+			ncounters[qinfo->block]++;
+		}
+
+		if (!((1ULL << qinfo->instance) & data->conf[qinfo->block].instances)) {
+			data->conf[qinfo->block].instances |= 1ULL << qinfo->instance;
+			ninstances[qinfo->block]++;
+		}
+	}
+
+	for (i = 0; i < PANFROST_NUM_BLOCKS; i++) {
+		data->buffers[i] = CALLOC(ninstances[i] * ncounters[i], sizeof(uint32_t));
+		if (!data->buffers[i])
+			goto err_free_data;
+	}
+
+	memcpy(create_perfmon.counters, &data->conf,
+	       sizeof(create_perfmon.counters));
+        ret = drmIoctl(drm->fd, DRM_IOCTL_PANFROST_CREATE_PERFMON, &create_perfmon);
+        if (ret)
+		goto err_free_data;
+
+	data->perfmon_handle = create_perfmon.id;
+	query->driver_data = data;
+
+	return true;
+
+err_free_data:
+	for (i = 0; i < PANFROST_NUM_BLOCKS; i++) {
+		if (data->buffers[i])
+			FREE(data->buffers[i]);
+	}
+
+	FREE(data);
+	return false;
+}
+
+static void
+panfrost_drm_destroy_perfcnt_query(struct panfrost_context *ctx,
+				   struct panfrost_perfcnt_query *query)
+{
+	struct panfrost_screen *screen = pan_screen(ctx->base.screen);
+	struct panfrost_drm *drm = (struct panfrost_drm *)screen->driver;
+	struct pandrost_drm_perfcnt_query *data = query->driver_data;
+	struct drm_panfrost_destroy_perfmon destroy_perfmon = { };
+	unsigned int i;
+	int ret;
+
+	destroy_perfmon.id = data->perfmon_handle;
+        ret = drmIoctl(drm->fd, DRM_IOCTL_PANFROST_DESTROY_PERFMON,
+		       &destroy_perfmon);
+	assert(!ret);
+
+	for (i = 0; i < PANFROST_NUM_BLOCKS; i++) {
+		if (data->buffers[i])
+			FREE(data->buffers[i]);
+	}
+
+	FREE(data);
+}
+
+static boolean
+panfrost_drm_begin_perfcnt_query(struct panfrost_context *ctx,
+				 struct panfrost_perfcnt_query *query)
+{
+	struct panfrost_screen *screen = pan_screen(ctx->base.screen);
+	struct panfrost_drm *drm = (struct panfrost_drm *)screen->driver;
+	struct pandrost_drm_perfcnt_query *data = query->driver_data;
+	unsigned int i;
+
+	for (i = 0; i < drm->nperfmons; i++) {
+		if (drm->perfmons[i] == data->perfmon_handle)
+			return true;
+	}
+
+	drm->perfmons = REALLOC(drm->perfmons, drm->nperfmons, drm->nperfmons + 1);
+	drm->perfmons[drm->nperfmons++] = data->perfmon_handle;
+
+	return true;
+}
+
+static boolean
+panfrost_drm_end_perfcnt_query(struct panfrost_context *ctx,
+			       struct panfrost_perfcnt_query *query)
+{
+	struct panfrost_screen *screen = pan_screen(ctx->base.screen);
+	struct panfrost_drm *drm = (struct panfrost_drm *)screen->driver;
+	struct pandrost_drm_perfcnt_query *data = query->driver_data;
+	unsigned int i;
+
+	for (i = 0; i < drm->nperfmons; i++) {
+		if (drm->perfmons[i] == data->perfmon_handle)
+			break;
+	}
+
+	if (i == drm->nperfmons)
+		return true;
+
+	drm->perfmons[i] = drm->perfmons[drm->nperfmons - 1];
+	drm->perfmons = REALLOC(drm->perfmons, drm->nperfmons, drm->nperfmons - 1);
+	drm->nperfmons--;
+
+	return true;
+}
+
+static void set_query_result(struct panfrost_screen *screen,
+			     struct panfrost_perfcnt_query *query,
+			     unsigned int block, unsigned int instance,
+			     unsigned int counterid, uint32_t val,
+			     union pipe_query_result *vresults)
+{
+	struct panfrost_perfcnt_query_info *qinfo;
+	const struct panfrost_counters *counters;
+	unsigned int i;
+
+	counters = screen->perfcnt_info.counters;
+	for (i = 0; i < query->ncounters; i++) {
+		qinfo = &screen->perfcnt_info.queries[query->counters[i]];
+
+		if (qinfo->block != block || qinfo->instance != instance ||
+		    counters->block[block].counters[qinfo->counter].id != counterid)
+			continue;
+
+		vresults->batch[i].u64 = val;
+	}
+}
+
+static boolean
+panfrost_drm_get_perfcnt_results(struct panfrost_context *ctx,
+				 struct panfrost_perfcnt_query *query,
+				 boolean wait,
+				 union pipe_query_result *vresults)
+{
+	struct panfrost_screen *screen = pan_screen(ctx->base.screen);
+	struct panfrost_drm *drm = (struct panfrost_drm *)screen->driver;
+	struct pandrost_drm_perfcnt_query *data = query->driver_data;
+	struct drm_panfrost_get_perfmon_values get_vals = { };
+	unsigned int i, j, k;
+	int ret;
+
+	get_vals.flags = DRM_PANFROST_GET_PERFMON_VALS_RESET;
+	if (!wait)
+		get_vals.flags |= DRM_PANFROST_GET_PERFMON_VALS_DONT_WAIT;
+
+	get_vals.id = data->perfmon_handle;
+	for (i = 0; i < PANFROST_NUM_BLOCKS; i++)
+		get_vals.values_ptrs[i] = (uint64_t)data->buffers[i];
+
+        ret = drmIoctl(drm->fd, DRM_IOCTL_PANFROST_GET_PERFMON_VALUES,
+		       &get_vals);
+	if (ret)
+		return false;
+
+	for (i = 0; i < PANFROST_NUM_BLOCKS; i++) {
+		uint32_t *val = data->buffers[i];
+
+		if (!data->conf[i].instances || !data->conf[i].counters)
+			continue;
+
+		for (j = 0; j < 64; j++) {
+			if (!((1ULL << j) & data->conf[i].instances))
+				continue;
+
+			for (k = 0; k < 64; k++) {
+				if (!((1ULL << k) & data->conf[i].counters))
+					continue;
+
+				set_query_result(screen, query, i, j, k, *val,
+						 vresults);
+				val++;
+			}
+		}
+	}
+
+	return true;
+}
+
 struct panfrost_driver *
 panfrost_create_drm_driver(int fd)
 {
@@ -419,6 +658,12 @@ panfrost_create_drm_driver(int fd)
 	driver->base.fence_reference = panfrost_drm_fence_reference;
 	driver->base.fence_finish = panfrost_drm_fence_finish;
 	driver->base.dump_counters = panfrost_drm_dump_counters;
+	driver->base.init_perfcnt = panfrost_drm_init_perfcnt;
+	driver->base.create_perfcnt_query = panfrost_drm_create_perfcnt_query;
+	driver->base.destroy_perfcnt_query = panfrost_drm_destroy_perfcnt_query;
+	driver->base.begin_perfcnt_query = panfrost_drm_begin_perfcnt_query;
+	driver->base.end_perfcnt_query = panfrost_drm_end_perfcnt_query;
+	driver->base.get_perfcnt_results = panfrost_drm_get_perfcnt_results;
 
         return &driver->base;
 }
