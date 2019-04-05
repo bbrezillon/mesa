@@ -689,11 +689,26 @@ midgard_nir_sysval_for_intrinsic(nir_intrinsic_instr *instr)
 static void
 midgard_nir_assign_sysval_body(compiler_context *ctx, nir_instr *instr)
 {
+	nir_intrinsic_instr *intr;
+	nir_tex_instr *tex;
         int sysval = -1;
 
-        if (instr->type == nir_instr_type_intrinsic) {
-                nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
+        switch (instr->type) {
+        case nir_instr_type_intrinsic:
+                intr = nir_instr_as_intrinsic(instr);
                 sysval = midgard_nir_sysval_for_intrinsic(intr);
+                break;
+	case nir_instr_type_tex:
+		tex = nir_instr_as_tex(instr);
+		if (tex->op != nir_texop_txs)
+			break;
+
+		sysval = PAN_SYSVAL(TEXTURE_SIZE,
+				    tex->texture_index +
+				    nir_tex_instr_src_index(tex, nir_tex_src_texture_offset));
+		break;
+	default:
+		break;
         }
 
         if (sysval < 0)
@@ -1583,11 +1598,32 @@ midgard_tex_format(enum glsl_sampler_dim dim)
 }
 
 static void
+emit_texture_size(compiler_context *ctx, nir_tex_instr *instr)
+{
+        /* First, pull out the destination */
+        unsigned dest = nir_dest_index(ctx, &instr->dest);
+
+        /* Now, figure out which uniform this is */
+        int sysval = PAN_SYSVAL(TEXTURE_SIZE,
+				instr->texture_index +
+				nir_tex_instr_src_index(instr, nir_tex_src_texture_offset));
+        void *val = _mesa_hash_table_u64_search(ctx->sysval_to_id, sysval);
+
+        /* Sysvals are prefix uniforms */
+        unsigned uniform = ((uintptr_t) val) - 1;
+
+        emit_uniform_read(ctx, dest, uniform);
+}
+
+static void
 emit_tex(compiler_context *ctx, nir_tex_instr *instr)
 {
         /* TODO */
         //assert (!instr->sampler);
         //assert (!instr->texture_array_size);
+	if (instr->op == nir_texop_txs)
+		emit_texture_size(ctx, instr);
+
         assert (instr->op == nir_texop_tex);
 
         /* Allocate registers via a round robin scheme to alternate between the two registers */

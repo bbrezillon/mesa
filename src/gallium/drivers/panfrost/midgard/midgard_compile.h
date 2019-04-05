@@ -34,7 +34,7 @@
 /* Allow 2D of sysval IDs, while allowing nonparametric sysvals to equal
  * their class for equal comparison */
 
-#define PAN_SYSVAL(type, no) ((no << 16) | PAN_SYSVAL_##type)
+#define PAN_SYSVAL(type, no) (((no) << 16) | PAN_SYSVAL_##type)
 
 /* Define some common types. We start at one for easy indexing of hash
  * tables internal to the compiler */
@@ -42,6 +42,7 @@
 enum {
         PAN_SYSVAL_VIEWPORT_SCALE = 1,
         PAN_SYSVAL_VIEWPORT_OFFSET = 2,
+        PAN_SYSVAL_TEXTURE_SIZE = 3,
 } pan_sysval;
 
 typedef struct {
