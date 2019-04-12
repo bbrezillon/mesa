@@ -742,9 +742,13 @@ panfrost_emit_vertex_data(struct panfrost_context *ctx)
         union mali_attr attrs[PIPE_MAX_ATTRIBS];
 
         unsigned invocation_count = MALI_NEGATIVE(ctx->payload_tiler.prefix.invocation_count);
+        unsigned vertex_buffer_count = 0;
 
-        for (int i = 0; i < ctx->vertex_buffer_count; ++i) {
-                struct pipe_vertex_buffer *buf = &ctx->vertex_buffers[i];
+        for (int i = 0; i < ARRAY_SIZE(ctx->vertex_buffers); ++i) {
+                struct pipe_vertex_buffer *buf = ctx->vertex_buffers[i];
+                if (!buf)
+                        continue;
+
                 struct panfrost_resource *rsrc = (struct panfrost_resource *) (buf->buffer.resource);
 
                 /* Let's figure out the layout of the attributes in memory so
@@ -782,9 +786,10 @@ panfrost_emit_vertex_data(struct panfrost_context *ctx)
                 } else {
                         /* Leave unset? */
                 }
+                vertex_buffer_count++;
         }
 
-        ctx->payload_vertex.postfix.attributes = panfrost_upload_transient(ctx, attrs, ctx->vertex_buffer_count * sizeof(union mali_attr));
+        ctx->payload_vertex.postfix.attributes = panfrost_upload_transient(ctx, attrs, vertex_buffer_count * sizeof(union mali_attr));
 
         panfrost_emit_varying_descriptor(ctx, invocation_count);
 }
@@ -1817,21 +1822,20 @@ panfrost_set_vertex_buffers(
         const struct pipe_vertex_buffer *buffers)
 {
         struct panfrost_context *ctx = pan_context(pctx);
-        assert(num_buffers <= PIPE_MAX_ATTRIBS);
+        unsigned i;
+        assert(start_slot + num_buffers <= PIPE_MAX_ATTRIBS);
 
-        /* XXX: Dirty tracking? etc */
-        if (buffers) {
-                size_t sz = sizeof(buffers[0]) * num_buffers;
-                ctx->vertex_buffers = malloc(sz);
-                ctx->vertex_buffer_count = num_buffers;
-                memcpy(ctx->vertex_buffers, buffers, sz);
-        } else {
-                if (ctx->vertex_buffers) {
-                        free(ctx->vertex_buffers);
-                        ctx->vertex_buffers = NULL;
+        for (i = start_slot; i < start_slot + num_buffers; i++) {
+                if (ctx->vertex_buffers[i]) {
+                        free(ctx->vertex_buffers[i]);
+                        ctx->vertex_buffers[i] = NULL;
                 }
 
-                ctx->vertex_buffer_count = 0;
+                if (!buffers)
+                        continue;
+
+                ctx->vertex_buffers[i] = malloc(sizeof(*buffers));
+                memcpy(ctx->vertex_buffers[i], buffers + i, sizeof(*buffers));
         }
 }
 

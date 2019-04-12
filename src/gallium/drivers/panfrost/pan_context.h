@@ -187,8 +187,7 @@ struct panfrost_context {
 
         struct panfrost_vertex_state *vertex;
 
-        struct pipe_vertex_buffer *vertex_buffers;
-        unsigned vertex_buffer_count;
+        struct pipe_vertex_buffer *vertex_buffers[PIPE_MAX_ATTRIBS];
 
         struct panfrost_sampler_state *samplers[PIPE_SHADER_TYPES][PIPE_MAX_SAMPLERS];
         unsigned sampler_count[PIPE_SHADER_TYPES];
