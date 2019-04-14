@@ -2003,8 +2003,11 @@ ttn_compile_init(const void *tgsi_tokens,
       c->cap_face_is_sysval = true;
    }
 
-   if (s->info.stage == MESA_SHADER_FRAGMENT)
+   if (s->info.stage == MESA_SHADER_FRAGMENT) {
       s->info.fs.untyped_color_outputs = true;
+      s->info.fs.origin_upper_left =
+	      scan.properties[TGSI_PROPERTY_FS_COORD_ORIGIN] == TGSI_FS_COORD_ORIGIN_UPPER_LEFT;
+   }
 
    s->num_inputs = scan.file_max[TGSI_FILE_INPUT] + 1;
    s->num_uniforms = scan.const_file_max[0] + 1;
