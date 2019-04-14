@@ -32,6 +32,8 @@
 #include "compiler/glsl/list.h"
 #include "compiler/shader_enums.h"
 
+#include "program/prog_statevars.h"
+
 #include "tgsi_to_nir.h"
 #include "tgsi/tgsi_parse.h"
 #include "tgsi/tgsi_dump.h"
@@ -99,6 +101,10 @@ struct ttn_compile {
    /* How many TGSI_FILE_IMMEDIATE vec4s have been parsed so far. */
    unsigned next_imm;
 
+   bool cap_fs_coord_origin_upper_left;
+   bool cap_fs_coord_origin_lower_left;
+   bool cap_fs_coord_pixel_center_integer;
+   bool cap_fs_coord_pixel_center_half_integer;
    bool cap_scalar;
    bool cap_face_is_sysval;
    bool cap_position_is_sysval;
@@ -1964,6 +1970,18 @@ ttn_read_pipe_caps(struct ttn_compile *c,
    c->cap_samplers_as_deref = screen->get_param(screen, PIPE_CAP_NIR_SAMPLERS_AS_DEREF);
    c->cap_face_is_sysval = screen->get_param(screen, PIPE_CAP_TGSI_FS_FACE_IS_INTEGER_SYSVAL);
    c->cap_position_is_sysval = screen->get_param(screen, PIPE_CAP_TGSI_FS_POSITION_IS_SYSVAL);
+   c->cap_fs_coord_origin_upper_left =
+      screen->get_param(screen,
+                        PIPE_CAP_TGSI_FS_COORD_ORIGIN_UPPER_LEFT);
+   c->cap_fs_coord_origin_lower_left =
+      screen->get_param(screen,
+                        PIPE_CAP_TGSI_FS_COORD_ORIGIN_LOWER_LEFT);
+   c->cap_fs_coord_pixel_center_integer =
+      screen->get_param(screen,
+                        PIPE_CAP_TGSI_FS_COORD_PIXEL_CENTER_INTEGER);
+   c->cap_fs_coord_pixel_center_half_integer =
+      screen->get_param(screen,
+                        PIPE_CAP_TGSI_FS_COORD_PIXEL_CENTER_HALF_INTEGER);
 }
 
 /**
@@ -2114,6 +2132,20 @@ ttn_finalize_nir(struct ttn_compile *c)
       NIR_PASS_V(nir, gl_nir_lower_samplers_as_deref, NULL);
    else
       NIR_PASS_V(nir, gl_nir_lower_samplers, NULL);
+
+   if (nir->info.stage == MESA_SHADER_FRAGMENT) {
+      nir_lower_wpos_ytransform_options wpos_options = {
+         .state_tokens = {
+            STATE_INTERNAL, STATE_FB_WPOS_Y_TRANSFORM,
+         },
+         .fs_coord_origin_upper_left = c->cap_fs_coord_origin_upper_left,
+         .fs_coord_origin_lower_left = c->cap_fs_coord_origin_lower_left,
+         .fs_coord_pixel_center_integer = c->cap_fs_coord_pixel_center_integer,
+         .fs_coord_pixel_center_half_integer = c->cap_fs_coord_pixel_center_half_integer,
+      };
+
+      NIR_PASS_V(nir, nir_lower_wpos_ytransform, &wpos_options);
+   }
 
    ttn_optimize_nir(nir, c->cap_scalar);
    nir_shader_gather_info(nir, c->build.impl);

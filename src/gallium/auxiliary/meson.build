@@ -525,7 +525,7 @@ libgallium = static_library(
   'gallium',
   [files_libgallium, u_indices_gen_c, u_unfilled_gen_c, u_format_table_c],
   include_directories : [
-    inc_loader, inc_gallium, inc_src, inc_include, include_directories('util')
+    inc_mesa, inc_loader, inc_gallium, inc_src, inc_include, include_directories('util')
   ],
   c_args : [c_vis_args, c_msvc_compat_args],
   cpp_args : [cpp_vis_args, cpp_msvc_compat_args],
