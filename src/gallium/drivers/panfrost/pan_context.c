@@ -1356,6 +1356,8 @@ panfrost_flush(
         /* Nothing to do! */
         if (!ctx->draw_count && !job->clear) return;
 
+	panfrost_draw_wallpaper(pipe);
+
         /* Whether to stall the pipeline for immediately correct results */
         bool flush_immediate = flags & PIPE_FLUSH_END_OF_FRAME;
 
@@ -1727,17 +1729,20 @@ panfrost_bind_sampler_states(
 static bool
 panfrost_variant_matches(struct panfrost_context *ctx, struct panfrost_shader_state *variant)
 {
-        struct pipe_alpha_state *alpha = &ctx->depth_stencil->alpha;
+        struct pipe_alpha_state alpha = { };
 
-        if (alpha->enabled || variant->alpha_state.enabled) {
+	if (ctx->depth_stencil)
+		alpha = ctx->depth_stencil->alpha;
+
+        if (alpha.enabled || variant->alpha_state.enabled) {
                 /* Make sure enable state is at least the same */
-                if (alpha->enabled != variant->alpha_state.enabled) {
+                if (alpha.enabled != variant->alpha_state.enabled) {
                         return false;
                 }
 
                 /* Check that the contents of the test are the same */
-                bool same_func = alpha->func == variant->alpha_state.func;
-                bool same_ref = alpha->ref_value == variant->alpha_state.ref_value;
+                bool same_func = alpha.func == variant->alpha_state.func;
+                bool same_ref = alpha.ref_value == variant->alpha_state.ref_value;
 
                 if (!(same_func && same_ref)) {
                         return false;
@@ -1776,7 +1781,12 @@ panfrost_bind_fs_state(
                         assert(variants->variant_count < MAX_SHADER_VARIANTS);
 
                         variants->variants[variant].base = hwcso;
-                        variants->variants[variant].alpha_state = ctx->depth_stencil->alpha;
+
+			if (ctx->depth_stencil)
+	                        variants->variants[variant].alpha_state = ctx->depth_stencil->alpha;
+			else
+	                        memset(&variants->variants[variant].alpha_state, 0,
+				       sizeof(variants->variants[variant].alpha_state));
 
                         /* Allocate the mapped descriptor ahead-of-time. TODO: Use for FS as well as VS */
                         struct panfrost_context *ctx = pan_context(pctx);

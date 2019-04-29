@@ -112,6 +112,7 @@ panfrost_enable_wallpaper_program(struct pipe_context *pctx)
 
         if (!wallpaper_program) {
                 wallpaper_program = panfrost_create_wallpaper_program(pctx);
+		printf("wallpaper prog %p\n", wallpaper_program);
         }
 
         /* Push the shader state */
@@ -136,12 +137,9 @@ panfrost_draw_wallpaper(struct pipe_context *pipe)
 {
         /* Disable wallpapering for now, but still exercise the shader generation to minimise bit rot */
 
-        panfrost_enable_wallpaper_program(pipe);
-        panfrost_disable_wallpaper_program(pipe);
+        //panfrost_enable_wallpaper_program(pipe);
 
-        return;
-
-#if 0
+#if 1
         struct panfrost_context *ctx = pan_context(pipe);
 
         /* Setup payload for elided quad. TODO: Refactor draw_vbo so this can
@@ -183,12 +181,12 @@ panfrost_draw_wallpaper(struct pipe_context *pipe)
                 .normalized_coords = 1
         };
 
-        struct pipe_resource *rsrc = pan_screen(pipe->screen)->display_target;
+        struct pipe_resource *rsrc = &pan_screen(pipe->screen)->display_target->base;
         struct pipe_sampler_state *sampler_state = pipe->create_sampler_state(pipe, &state);
         struct pipe_sampler_view *sampler_view = pipe->create_sampler_view(pipe, rsrc, &tmpl);
 
         /* Bind texture/sampler. TODO: push/pop */
-        pipe->bind_sampler_states(pipe, PIPE_SHADER_FRAGMENT, 0, 1, &sampler_state);
+        pipe->bind_sampler_states(pipe, PIPE_SHADER_FRAGMENT, 0, 1, (void **)&sampler_state);
         pipe->set_sampler_views(pipe, PIPE_SHADER_FRAGMENT, 0, 1, &sampler_view);
 
         panfrost_emit_for_draw(ctx, false);
@@ -209,9 +207,9 @@ panfrost_draw_wallpaper(struct pipe_context *pipe)
 
                 /* The following output is correct for a fullscreen quad with screen size 2048x1600 */
                 0.0, 0.0, 0.0, 1.0,
-                0.0, 1600.0, 0.0, 1.0,
-                2048.0, 0.0, 0.0, 1.0,
-                2048.0, 1280.0, 0.0, 1.0,
+                0.0, ctx->pipe_framebuffer.height, 0.0, 1.0,
+                ctx->pipe_framebuffer.width, 0.0, 0.0, 1.0,
+                ctx->pipe_framebuffer.width, ctx->pipe_framebuffer.height, 0.0, 1.0,
         };
 
         ctx->payload_tiler.postfix.position_varying = panfrost_upload_transient(ctx, implied_position_varying, sizeof(implied_position_varying));
@@ -238,11 +236,9 @@ panfrost_draw_wallpaper(struct pipe_context *pipe)
 
         struct mali_attr_meta varying_meta[1] = {
                 {
-                        .type = MALI_ATYPE_FLOAT,
-                        .nr_components = MALI_POSITIVE(4),
-                        .not_normalised = 1,
-                        .unknown1 = /*0x2c22 - nr_comp=2*/ 0x2a22,
-                        .unknown2 = 0x1
+			.format = MALI_RGBA32F,
+                        .swizzle = panfrost_get_default_swizzle(4),
+                        .unknown1 = 0x2,
                 }
         };
 
@@ -265,10 +261,11 @@ panfrost_draw_wallpaper(struct pipe_context *pipe)
          */
 
         if (ctx->tiler_job_count > 1) {
+//		printf("%s:%i\n", __func__, __LINE__);
                 ctx->u_tiler_jobs[0]->job_dependency_index_2 = jd->job_index;
         }
 
-        printf("Wallpaper boop\n");
+//        printf("width x height = %d x %d\n", ctx->pipe_framebuffer.width, ctx->pipe_framebuffer.height);
         
         /* Cleanup */
         panfrost_disable_wallpaper_program(pipe);
