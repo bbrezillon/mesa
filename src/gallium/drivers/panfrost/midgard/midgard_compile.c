@@ -1494,23 +1494,12 @@ emit_intrinsic(compiler_context *ctx, nir_intrinsic_instr *instr)
                         /* XXX: Half-floats? */
                         /* TODO: swizzle, mask */
 
-			nir_variable *in = NULL;
-                        nir_foreach_variable(var, &ctx->nir->inputs) {
-                                int drvloc = var->data.driver_location;
-
-                                if (nir_intrinsic_base(instr) == drvloc) {
-					in = var;
-                                        break;
-                                }
-                        }
-
-			printf("%s:%i in = %p\n", __func__, __LINE__, in);
                         midgard_instruction ins = m_load_vary_32(reg, offset);
 
                         midgard_varying_parameter p = {
                                 .is_varying = 1,
                                 .interpolation = midgard_interp_default,
-                                /*.flat = (in && in->data.interpolation == INTERP_MODE_FLAT),*/
+                                .flat = /*var->data.interpolation == INTERP_MODE_FLAT*/ 0
                         };
 
                         unsigned u;

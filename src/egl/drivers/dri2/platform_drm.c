@@ -466,7 +466,6 @@ dri2_drm_query_buffer_age(_EGLDriver *drv,
       return -1;
    }
 
-//   printf("%s:%i buffer age %d\n", __func__, __LINE__, dri2_surf->back->age);
    return dri2_surf->back->age;
 }
 

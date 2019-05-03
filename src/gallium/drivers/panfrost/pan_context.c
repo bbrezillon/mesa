@@ -603,7 +603,6 @@ panfrost_vertex_tiler_job(struct panfrost_context *ctx, bool is_tiler, bool is_e
         if (is_tiler && !is_elided_tiler) {
                 /* Tiler jobs depend on vertex jobs */
 
-		printf("%s:%i\n", __func__, __LINE__);
                 job.job_dependency_index_1 = draw_job_index;
 
                 /* Tiler jobs also depend on the previous tiler job */
@@ -1101,9 +1100,6 @@ panfrost_emit_for_draw(struct panfrost_context *ctx, bool with_vertex_data)
         bool invert_y = vp->scale[1] < 0.0;
         float translate_y = vp->translate[1];
 
-	printf("%s:%i vp scale %f %f %f translate %f %f %f\n", __func__, __LINE__,
-	       vp->scale[0], vp->scale[1], vp->scale[2],
-	       vp->translate[0], vp->translate[1], vp->translate[2]);
         if (invert_y)
                 translate_y = ctx->pipe_framebuffer.height - translate_y;
 
@@ -1127,7 +1123,6 @@ panfrost_emit_for_draw(struct panfrost_context *ctx, bool with_vertex_data)
                         if (sysval == PAN_SYSVAL_VIEWPORT_SCALE) {
                                 uniforms[4*i + 0] = vp->scale[0];
                                 uniforms[4*i + 1] = fabsf(vp->scale[1]);
-                                //uniforms[4*i + 1] = vp->scale[1];
                                 uniforms[4*i + 2] = vp->scale[2];
                         } else if (sysval == PAN_SYSVAL_VIEWPORT_OFFSET) {
                                 uniforms[4*i + 0] = vp->translate[0];
@@ -1206,7 +1201,6 @@ panfrost_emit_for_draw(struct panfrost_context *ctx, bool with_vertex_data)
         view.viewport1[1] = MALI_POSITIVE((int) (translate_y + fabs(vp->scale[1])));
 
         if (ss && ctx->rasterizer && ctx->rasterizer->base.scissor) {
-		assert(0);
                 /* Invert scissor if needed */
                 unsigned miny = invert_y ?
                         ctx->pipe_framebuffer.height - ss->maxy : ss->miny;
@@ -1290,7 +1284,6 @@ panfrost_link_jobs(struct panfrost_context *ctx)
         }
 
         /* T -> T/null */
-
         for (int i = 0; i < ctx->tiler_job_count; ++i) {
                 bool isLast = (i + 1) == ctx->tiler_job_count;
                 panfrost_link_job_pair(ctx->u_tiler_jobs[i], isLast ? 0 : ctx->tiler_jobs[i + 1]);
@@ -1313,15 +1306,6 @@ panfrost_submit_frame(struct panfrost_context *ctx, bool flush_immediate,
         /* Workaround a bizarre lockup (a hardware errata?) */
         if (!has_draws)
                 flush_immediate = true;
-	else if (!(job->clear & PIPE_CLEAR_COLOR)) {
-                flush_immediate = true;
-		printf("%s:%i clear %08x \n", __func__, __LINE__, job->clear);
-		panfrost_draw_wallpaper(&ctx->base);
-	} else {
-		printf("%s:%i clear %08x \n", __func__, __LINE__, job->clear);
-//		panfrost_draw_wallpaper(&ctx->base);
-	}
-
 
         /* A number of jobs are batched -- this must be linked and cleared */
         panfrost_link_jobs(ctx);
@@ -1368,24 +1352,16 @@ panfrost_flush(
 {
         struct panfrost_context *ctx = pan_context(pipe);
         struct panfrost_job *job = panfrost_get_job_for_fbo(ctx);
-	static int nflush = 0;
 
         /* Nothing to do! */
-//	if (nflush++ > 13)
-//		return;
-        if (!ctx->draw_count && !job->clear) {
-		printf("%s:%i\n", __func__, __LINE__);
-		return;
-	}
+        if (!ctx->draw_count && !job->clear) return;
 
         /* Whether to stall the pipeline for immediately correct results */
         bool flush_immediate = flags & PIPE_FLUSH_END_OF_FRAME;
-//	flush_immediate = true;
 
         /* Submit the frame itself */
         panfrost_submit_frame(ctx, flush_immediate, fence, job);
 
-//	sleep(2);
         /* Prepare for the next frame */
         panfrost_invalidate_frame(ctx);
 }
@@ -2087,7 +2063,6 @@ panfrost_set_framebuffer_state(struct pipe_context *pctx,
                 panfrost_attach_vt_framebuffer(ctx);
 
                 struct panfrost_resource *tex = ((struct panfrost_resource *) ctx->pipe_framebuffer.cbufs[i]->texture);
-		printf("%s:%i cb[%d] tex %p\n", __func__, __LINE__, i, tex);
                 bool is_scanout = panfrost_is_scanout(ctx);
 
                 if (!is_scanout && tex->bo->layout != PAN_AFBC) {
@@ -2141,7 +2116,7 @@ panfrost_create_blend_state(struct pipe_context *pipe,
 
         /* Compile the blend state, first as fixed-function if we can */
 
-        if (panfrost_make_fixed_blend_mode(&blend->rt[0], &so->equation, &ctx->blend_color))
+        if (panfrost_make_fixed_blend_mode(&blend->rt[0], &so->equation, blend->rt[0].colormask, &ctx->blend_color))
                 return so;
 
         /* If we can't, compile a blend shader instead */
@@ -2163,11 +2138,6 @@ panfrost_bind_blend_state(struct pipe_context *pipe,
         if (!blend)
                 return;
 
-	printf("%s:%i blend enble %d rgb %d %d %d alpha %d %d %d  colormask %x\n", __func__, __LINE__,
-	       blend->rt[0].blend_enable,
-	       blend->rt[0].rgb_func, blend->rt[0].rgb_src_factor, blend->rt[0].rgb_dst_factor, 
-	       blend->rt[0].alpha_func, blend->rt[0].alpha_src_factor, blend->rt[0].alpha_dst_factor,
-	       blend->rt[0].colormask);
         SET_BIT(ctx->fragment_shader_core.unknown2_4, MALI_NO_DITHER, !blend->dither);
 
         /* TODO: Attach color */
@@ -2309,7 +2279,6 @@ panfrost_set_scissor_states(struct pipe_context *pipe,
 
         assert(start_slot == 0);
         assert(num_scissors == 1);
-	printf("%s:%i scissors %d %d %d %d\n", __func__, __LINE__, scissors->minx, scissors->miny, scissors->maxx, scissors->maxy);
 
         ctx->scissor = *scissors;
 }

@@ -750,29 +750,19 @@ static void blitter_set_rectangle(struct blitter_context_priv *ctx,
 
    /* set vertex positions */
    ctx->vertices[0][0][0] = (float)x1 / ctx->dst_width * 2.0f - 1.0f; /*v0.x*/
-   ctx->vertices[0][0][1] = (float)y2 / ctx->dst_height * 2.0f - 1.0f; /*v0.y*/
+   ctx->vertices[0][0][1] = (float)y1 / ctx->dst_height * 2.0f - 1.0f; /*v0.y*/
 
    ctx->vertices[1][0][0] = (float)x2 / ctx->dst_width * 2.0f - 1.0f; /*v1.x*/
-   ctx->vertices[1][0][1] = (float)y2 / ctx->dst_height * 2.0f - 1.0f; /*v1.y*/
+   ctx->vertices[1][0][1] = (float)y1 / ctx->dst_height * 2.0f - 1.0f; /*v1.y*/
 
    ctx->vertices[2][0][0] = (float)x2 / ctx->dst_width * 2.0f - 1.0f; /*v2.x*/
-   ctx->vertices[2][0][1] = (float)y1 / ctx->dst_height * 2.0f - 1.0f; /*v2.y*/
+   ctx->vertices[2][0][1] = (float)y2 / ctx->dst_height * 2.0f - 1.0f; /*v2.y*/
 
    ctx->vertices[3][0][0] = (float)x1 / ctx->dst_width * 2.0f - 1.0f; /*v3.x*/
-   ctx->vertices[3][0][1] = (float)y1 / ctx->dst_height * 2.0f - 1.0f; /*v3.y*/
+   ctx->vertices[3][0][1] = (float)y2 / ctx->dst_height * 2.0f - 1.0f; /*v3.y*/
 
    for (i = 0; i < 4; i++)
       ctx->vertices[i][0][2] = depth; /*z*/
-
-   printf("%s:%i box %d %d -> %d %d\n", __func__, __LINE__, x1, y1, x2, y2);
-   for (i = 0; i < 4; i++)
-     printf("%s:%i pos v[%d] %f %f %f %f\n", __func__, __LINE__, i,
-	    ctx->vertices[i][0][0],ctx->vertices[i][0][1],
-	    ctx->vertices[i][0][2], ctx->vertices[i][0][3]);
-   for (i = 0; i < 4; i++)
-     printf("%s:%i texcoord v[%d] %f %f %f %f\n", __func__, __LINE__, i,
-	    ctx->vertices[i][1][0],ctx->vertices[i][1][1],
-	    ctx->vertices[i][1][2], ctx->vertices[i][1][3]);
 
    /* viewport */
    struct pipe_viewport_state viewport;
@@ -869,9 +859,6 @@ static void blitter_set_dst_dimensions(struct blitter_context_priv *ctx,
 static void set_texcoords_in_vertices(const union blitter_attrib *attrib,
                                       float *out, unsigned stride)
 {
-//   printf("%s:%i tex coords %f %f -> %f %f\n", __func__, __LINE__,
-//	  attrib->texcoord.x1, attrib->texcoord.y1,
-//	  attrib->texcoord.x2, attrib->texcoord.y2);
    out[0] = attrib->texcoord.x1;
    out[1] = attrib->texcoord.y1;
    out += stride;
@@ -985,12 +972,10 @@ static void *blitter_get_fs_texfetch_col(struct blitter_context_priv *ctx,
       /* Create the fragment shader on-demand. */
       if (!*shader) {
          assert(!ctx->cached_all_shaders);
-	 printf("%s:%i\n", __func__, __LINE__);
          *shader = util_make_fragment_tex_shader(pipe, tgsi_tex,
                                                  TGSI_INTERPOLATE_LINEAR,
                                                  stype, dtype,
                                                  ctx->has_tex_lz, use_txf);
-	 printf("%s:%i\n", __func__, __LINE__);
       }
 
       return *shader;
