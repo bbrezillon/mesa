@@ -360,12 +360,12 @@ static const struct pipe_rt_blend_state default_blend = {
 };
 
 bool
-panfrost_make_fixed_blend_mode(const struct pipe_rt_blend_state *blend, struct mali_blend_equation *out, unsigned colormask, const struct pipe_blend_color *blend_color)
+panfrost_make_fixed_blend_mode(const struct pipe_rt_blend_state *blend, struct mali_blend_equation *out, const struct pipe_blend_color *blend_color)
 {
         /* If no blending is enabled, default back on `replace` mode */
 
         if (!blend->blend_enable)
-                return panfrost_make_fixed_blend_mode(&default_blend, out, colormask, blend_color);
+                return panfrost_make_fixed_blend_mode(&default_blend, out, blend_color);
 
         /* We have room only for a single float32 constant between the four
          * components. If we need more, spill to the programmable pipeline. */
@@ -395,7 +395,7 @@ panfrost_make_fixed_blend_mode(const struct pipe_rt_blend_state *blend, struct m
         out->alpha_mode = alpha_mode;
 
         /* Gallium and Mali represent colour masks identically. XXX: Static assert for future proof */
-        out->color_mask = colormask;
+        out->color_mask = blend->colormask;
 
         return true;
 }

@@ -103,7 +103,9 @@ panfrost_create_wallpaper_program(struct pipe_context *pctx)
 }
 
 static struct panfrost_shader_variants *wallpaper_program = NULL;
+static struct panfrost_blend_state *wallpaper_blend = NULL;
 static struct panfrost_shader_variants *wallpaper_saved_program = NULL;
+static struct panfrost_blend_state *wallpaper_saved_blend = NULL;
 
 static void
 panfrost_enable_wallpaper_program(struct pipe_context *pctx)
@@ -111,14 +113,28 @@ panfrost_enable_wallpaper_program(struct pipe_context *pctx)
         struct panfrost_context *ctx = pan_context(pctx);
 
         if (!wallpaper_program) {
+		struct pipe_blend_state bs = {
+			.rt[0].blend_enable = 1,
+			.rt[0].rgb_func = PIPE_BLEND_ADD,
+			.rt[0].rgb_src_factor = PIPE_BLENDFACTOR_ONE,
+			.rt[0].rgb_dst_factor = PIPE_BLENDFACTOR_ZERO,
+			.rt[0].alpha_func = PIPE_BLEND_ADD,
+			.rt[0].alpha_src_factor = PIPE_BLENDFACTOR_ZERO,
+			.rt[0].alpha_dst_factor = PIPE_BLENDFACTOR_ONE,
+			.rt[0].colormask = PIPE_MASK_R | PIPE_MASK_G | PIPE_MASK_B | PIPE_MASK_A,
+		};
+
                 wallpaper_program = panfrost_create_wallpaper_program(pctx);
+	        wallpaper_blend = pctx->create_blend_state(pctx, &bs);
         }
 
         /* Push the shader state */
         wallpaper_saved_program = ctx->fs;
+        wallpaper_saved_blend = ctx->blend;
 
         /* Bind the program */
         pctx->bind_fs_state(pctx, wallpaper_program);
+        pctx->bind_blend_state(pctx, wallpaper_blend);
 }
 
 static void
@@ -126,6 +142,7 @@ panfrost_disable_wallpaper_program(struct pipe_context *pctx)
 {
         /* Pop off the shader state */
         pctx->bind_fs_state(pctx, wallpaper_saved_program);
+        pctx->bind_blend_state(pctx, wallpaper_saved_blend);
 }
 
 /* Essentially, we insert a fullscreen textured quad, reading from the
@@ -135,13 +152,68 @@ void
 panfrost_draw_wallpaper(struct pipe_context *pipe)
 {
         /* Disable wallpapering for now, but still exercise the shader generation to minimise bit rot */
+	struct panfrost_screen *screen = pan_screen(pipe->screen);
+/*
+	struct panfrost_context *ctx = pan_context(pipe);
+	struct pipe_blit_info binfo = { };
+//	return;
+//        panfrost_enable_wallpaper_program(pipe);
+//        panfrost_disable_wallpaper_program(pipe);
 
-        panfrost_enable_wallpaper_program(pipe);
-        panfrost_disable_wallpaper_program(pipe);
+	printf("%s:%i scanout %d\n", __func__, __LINE__, panfrost_is_scanout(ctx));
+        util_blitter_save_vertex_buffer_slot(ctx->blitter, ctx->vertex_buffers);
+        util_blitter_save_vertex_elements(ctx->blitter, ctx->vertex);
+        util_blitter_save_vertex_shader(ctx->blitter, ctx->vs);
+        util_blitter_save_rasterizer(ctx->blitter, ctx->rasterizer);
+        util_blitter_save_viewport(ctx->blitter, &ctx->pipe_viewport);
+        util_blitter_save_scissor(ctx->blitter, &ctx->scissor);
+        util_blitter_save_fragment_shader(ctx->blitter, ctx->fs);
+        util_blitter_save_blend(ctx->blitter, ctx->blend);
+        util_blitter_save_depth_stencil_alpha(ctx->blitter, ctx->depth_stencil);
+        util_blitter_save_stencil_ref(ctx->blitter, &ctx->stencil_ref);
+	util_blitter_save_so_targets(ctx->blitter, 0, NULL);
+//        util_blitter_save_sample_mask(ctx->blitter, vc4->sample_mask);
+        util_blitter_save_framebuffer(ctx->blitter, &ctx->pipe_framebuffer);
+        util_blitter_save_fragment_sampler_states(ctx->blitter,
+						  ctx->sampler_count[0],
+						  (void **)(&ctx->samplers[0]));
+        util_blitter_save_fragment_sampler_views(ctx->blitter,
+						 ctx->sampler_view_count[0],
+						 (struct pipe_sampler_view **)&ctx->sampler_views[0]);
+
+//	binfo.src.resource = binfo.dst.resource = &screen->display_target->base;
+	binfo.src.resource = binfo.dst.resource = ctx->pipe_framebuffer.cbufs[0]->texture;
+	binfo.src.level = binfo.dst.level = 0;
+//	binfo.src.box.x = binfo.dst.box.x = ctx->pipe_framebuffer.width/4;
+//	binfo.src.box.y = binfo.dst.box.y = ctx->pipe_framebuffer.width/4;
+	binfo.src.box.width = binfo.dst.box.width = ctx->pipe_framebuffer.width;
+	binfo.src.box.height = binfo.dst.box.height = ctx->pipe_framebuffer.height;
+//	binfo.src.box.depth = binfo.dst.box.depth = 1;
+//	binfo.src.format = binfo.dst.format = screen->display_target->base.format;
+	binfo.src.format = binfo.dst.format = ctx->pipe_framebuffer.cbufs[0]->texture->format;
+	printf("%s:%i format %d\n", __func__, __LINE__, binfo.dst.format);
+	assert(ctx->pipe_framebuffer.nr_cbufs == 1);
+	binfo.mask = PIPE_MASK_RGBA;
+	printf("%s:%i tiler jobs %d draw cnt %d\n", __func__, __LINE__, ctx->tiler_job_count, ctx->draw_count);
+	util_blitter_blit(ctx->blitter, &binfo);
+        struct mali_job_descriptor_header *jd = ctx->u_tiler_jobs[ctx->tiler_job_count - 1];
+	printf("%s:%i tiler jobs %d draw cnt %d\n", __func__, __LINE__, ctx->tiler_job_count, ctx->draw_count);
+        ctx->u_tiler_jobs[0]->job_dependency_index_2 = jd->job_index;
+        jd->job_dependency_index_2 = 0;
+	printf("%s:%i job index %d\n", __func__, __LINE__,
+	       ctx->u_tiler_jobs[0]->job_dependency_index_2);
+	memmove(ctx->u_tiler_jobs + 1, ctx->u_tiler_jobs,
+	        (ctx->tiler_job_count - 1) * sizeof(*ctx->u_tiler_jobs));
+	ctx->u_tiler_jobs[0] = jd;
+	jd = ctx->u_vertex_jobs[ctx->vertex_job_count - 1];
+	memmove(ctx->u_vertex_jobs + 1, ctx->u_vertex_jobs,
+	        (ctx->vertex_job_count - 1) * sizeof(*ctx->u_vertex_jobs));
+	ctx->u_vertex_jobs[0] = jd;
 
         return;
+*/
 
-#if 0
+#if 1
         struct panfrost_context *ctx = pan_context(pipe);
 
         /* Setup payload for elided quad. TODO: Refactor draw_vbo so this can
@@ -183,14 +255,20 @@ panfrost_draw_wallpaper(struct pipe_context *pipe)
                 .normalized_coords = 1
         };
 
-        struct pipe_resource *rsrc = pan_screen(pipe->screen)->display_target;
+//        struct pipe_resource *rsrc = &pan_screen(pipe->screen)->display_target->base;
+        struct pipe_resource *rsrc = ctx->pipe_framebuffer.cbufs[0]->texture;
+
         struct pipe_sampler_state *sampler_state = pipe->create_sampler_state(pipe, &state);
         struct pipe_sampler_view *sampler_view = pipe->create_sampler_view(pipe, rsrc, &tmpl);
 
         /* Bind texture/sampler. TODO: push/pop */
-        pipe->bind_sampler_states(pipe, PIPE_SHADER_FRAGMENT, 0, 1, &sampler_state);
+        pipe->bind_sampler_states(pipe, PIPE_SHADER_FRAGMENT, 0, 1, (void **)&sampler_state);
         pipe->set_sampler_views(pipe, PIPE_SHADER_FRAGMENT, 0, 1, &sampler_view);
 
+	printf("%s:%i format %d\n", __func__, __LINE__,
+	       ctx->pipe_framebuffer.cbufs[0]->texture->format);
+	printf("%s:%i tex %p disp target rsrc %p is_scanout %d\n", __func__, __LINE__, ctx->pipe_framebuffer.cbufs[0]->texture, rsrc, panfrost_is_scanout(ctx));
+//	assert(ctx->pipe_framebuffer.cbufs[0]->texture == rsrc);
         panfrost_emit_for_draw(ctx, false);
 
         /* Elision occurs by essential precomputing the results of the
@@ -208,10 +286,22 @@ panfrost_draw_wallpaper(struct pipe_context *pipe)
 //                65536.0, 65536.0,  0.0, 1.0
 
                 /* The following output is correct for a fullscreen quad with screen size 2048x1600 */
+		/*
                 0.0, 0.0, 0.0, 1.0,
                 0.0, 1600.0, 0.0, 1.0,
                 2048.0, 0.0, 0.0, 1.0,
                 2048.0, 1280.0, 0.0, 1.0,
+		*/
+		/*
+                -1.0, -1.0,        0.0, 1.0,
+                -1.0, 65535.0,     0.0, 1.0,
+                65536.0, 1.0,      0.0, 1.0,
+                65536.0, 65536.0,  0.0, 1.0
+		*/
+		0.0, ctx->pipe_framebuffer.height - 1, 0.0, 1.0,
+                0.0, 0.0, 0.0, 1.0,
+                ctx->pipe_framebuffer.width, ctx->pipe_framebuffer.height - 1, 0.0, 1.0,
+                ctx->pipe_framebuffer.width, 0.0, 0.0, 1.0,
         };
 
         ctx->payload_tiler.postfix.position_varying = panfrost_upload_transient(ctx, implied_position_varying, sizeof(implied_position_varying));
@@ -238,11 +328,9 @@ panfrost_draw_wallpaper(struct pipe_context *pipe)
 
         struct mali_attr_meta varying_meta[1] = {
                 {
-                        .type = MALI_ATYPE_FLOAT,
-                        .nr_components = MALI_POSITIVE(4),
-                        .not_normalised = 1,
-                        .unknown1 = /*0x2c22 - nr_comp=2*/ 0x2a22,
-                        .unknown2 = 0x1
+                        .format = MALI_RGBA32F,
+                        .swizzle = panfrost_get_default_swizzle(4),
+                        .unknown1 = 0x2,
                 }
         };
 
@@ -252,7 +340,9 @@ panfrost_draw_wallpaper(struct pipe_context *pipe)
         /* Emit the tiler job */
         struct panfrost_transfer tiler = panfrost_vertex_tiler_job(ctx, true, true);
         struct mali_job_descriptor_header *jd = (struct mali_job_descriptor_header *) tiler.cpu;
-        ctx->u_tiler_jobs[ctx->tiler_job_count] = jd;
+//        ctx->u_tiler_jobs[ctx->tiler_job_count] = jd;
+	memmove(ctx->u_tiler_jobs + 1, ctx->u_tiler_jobs, ctx->tiler_job_count * sizeof(*ctx->u_tiler_jobs));
+        ctx->u_tiler_jobs[0] = jd;
         ctx->tiler_jobs[ctx->tiler_job_count++] = tiler.gpu;
         ctx->draw_count++;
 
@@ -265,8 +355,11 @@ panfrost_draw_wallpaper(struct pipe_context *pipe)
          */
 
         if (ctx->tiler_job_count > 1) {
-                ctx->u_tiler_jobs[0]->job_dependency_index_2 = jd->job_index;
+                ctx->u_tiler_jobs[1]->job_dependency_index_2 = jd->job_index;
         }
+//        if (ctx->tiler_job_count > 1) {
+//                ctx->u_tiler_jobs[0]->job_dependency_index_2 = jd->job_index;
+//        }
 
         printf("Wallpaper boop\n");
         
