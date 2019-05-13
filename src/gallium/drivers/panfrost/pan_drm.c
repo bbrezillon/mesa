@@ -40,6 +40,7 @@
 
 struct panfrost_drm {
 	struct panfrost_driver base;
+	FILE *perfcnt_dump_file;
 	int fd;
 };
 
@@ -321,13 +322,25 @@ panfrost_drm_force_flush_fragment(struct panfrost_context *ctx,
 static void
 panfrost_drm_enable_counters(struct panfrost_screen *screen)
 {
-	fprintf(stderr, "unimplemented: %s\n", __func__);
+	FILE *f;
+
+	f = fopen("/sys/kernel/debug/dri/128/perfcnt/enable", "w");
+	assert(f);
+	assert(fprintf(f, "Y\n") > 0);
+	fclose(f);
 }
 
 static void
 panfrost_drm_dump_counters(struct panfrost_screen *screen)
 {
-	fprintf(stderr, "unimplemented: %s\n", __func__);
+	struct panfrost_drm *drm = (struct panfrost_drm *)screen->driver;
+
+	if (!drm->perfcnt_dump_file)
+		drm->perfcnt_dump_file = fopen("/sys/kernel/debug/dri/128/perfcnt/dump", "r");
+
+	assert(drm->perfcnt_dump_file);
+	assert(!fseek(drm->perfcnt_dump_file, 0, SEEK_SET));
+	assert(fread(screen->perf_counters, 256, 8, drm->perfcnt_dump_file) > 0);
 }
 
 static unsigned

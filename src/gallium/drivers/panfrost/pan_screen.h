@@ -84,7 +84,7 @@ struct panfrost_screen {
         struct renderonly *ro;
         struct panfrost_driver *driver;
 
-        struct panfrost_memory perf_counters;
+	void *perf_counters;
 
         /* Memory management is based on subdividing slabs with AMD's allocator */
         struct pb_slabs slabs;

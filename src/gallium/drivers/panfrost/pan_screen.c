@@ -584,7 +584,7 @@ panfrost_create_screen(int fd, struct renderonly *ro)
         }
 
         if (pan_counters_base) {
-                screen->driver->allocate_slab(screen, &screen->perf_counters, 64, true, 0, 0, 0);
+		screen->perf_counters = calloc(4096, sizeof(uint32_t));
                 screen->driver->enable_counters(screen);
         }
 

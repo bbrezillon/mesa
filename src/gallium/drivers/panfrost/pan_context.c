@@ -1374,7 +1374,8 @@ panfrost_submit_frame(struct panfrost_context *ctx, bool flush_immediate,
                 char filename[128];
                 snprintf(filename, sizeof(filename), "%s/frame%d.mdgprf", pan_counters_base, ++performance_counter_number);
                 FILE *fp = fopen(filename, "wb");
-                fwrite(screen->perf_counters.cpu,  4096, sizeof(uint32_t), fp);
+		assert(fp);
+                fwrite(screen->perf_counters,  4096, sizeof(uint32_t), fp);
                 fclose(fp);
         }
 
