@@ -979,6 +979,50 @@ lower_tg4_offsets(nir_builder *b, nir_tex_instr *tex)
 }
 
 static bool
+nir_lower_txs_lod(nir_builder *b, nir_tex_instr *tex)
+{
+   int lod_idx = nir_tex_instr_src_index(tex, nir_tex_src_lod);
+   if (lod_idx < 0 ||
+       (nir_src_is_const(tex->src[lod_idx].src) &&
+        !nir_src_as_int(tex->src[lod_idx].src)))
+      return false;
+
+   nir_ssa_def *lod = nir_ssa_for_src(b, tex->src[lod_idx].src, 1);
+   unsigned dest_size = nir_tex_instr_dest_size(tex);
+   nir_ssa_def *shift, *min, *result;
+
+   b->cursor = nir_after_instr(&tex->instr);
+
+   switch (dest_size) {
+   case 3:
+      shift = nir_vec3(b, lod, lod, tex->is_array ? nir_imm_int(b, 0) : lod);
+      min = nir_imm_ivec3(b, 1, 1, tex->is_array ? 0 : 1);
+      break;
+   case 2:
+      shift = nir_vec2(b, lod, tex->is_array ? nir_imm_int(b, 0) : lod);
+      min = nir_imm_ivec2(b, 1, tex->is_array ? 0 : 1);
+      break;
+   case 1:
+      shift = lod;
+      min = nir_imm_int(b, 1);
+      break;
+   default:
+      unreachable("Invalid nir_tex_instr_dest_size()\n");
+   }
+
+   /* TXS(LOD) = max(TXS(0) >> LOD, 1) */
+   result = nir_imax(b, nir_ishr(b, &tex->dest.ssa, shift), min);
+   nir_ssa_def_rewrite_uses_after(&tex->dest.ssa, nir_src_for_ssa(result),
+                                  result->parent_instr);
+
+   /* Replace the non-0-LOD in the initial TXS operation by a 0-LOD. */
+   b->cursor = nir_before_instr(&tex->instr);
+   nir_instr_rewrite_src(&tex->instr, &tex->src[lod_idx].src,
+                         nir_src_for_ssa(nir_imm_int(b, 0)));
+   return true;
+}
+
+static bool
 nir_lower_tex_block(nir_block *block, nir_builder *b,
                     const nir_lower_tex_options *options)
 {
@@ -1129,6 +1173,11 @@ nir_lower_tex_block(nir_block *block, nir_builder *b,
          if (tex->op == nir_texop_tex && options->lower_tex_without_implicit_lod)
             tex->op = nir_texop_txl;
          progress = true;
+         continue;
+      }
+
+      if (options->lower_txs_lod && tex->op == nir_texop_txs) {
+         progress |= nir_lower_txs_lod(b, tex);
          continue;
       }
 
