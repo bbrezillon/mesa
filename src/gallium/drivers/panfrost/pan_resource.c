@@ -414,7 +414,8 @@ panfrost_resource_create_bo(struct panfrost_screen *screen, struct panfrost_reso
 
         /* We create a BO immediately but don't bother mapping, since we don't
          * care to map e.g. FBOs which the CPU probably won't touch */
-        pres->bo = panfrost_bo_create(screen, bo_size, PAN_BO_DELAY_MMAP);
+        pres->bo = panfrost_bo_create(screen, bo_size, PAN_BO_DELAY_MMAP, "create resource");
+	pres->bo->rsc = res;
 }
 
 void
@@ -603,7 +604,7 @@ panfrost_transfer_map(struct pipe_context *pctx,
                          */
                         if (!(bo->flags & (PAN_BO_IMPORTED | PAN_BO_EXPORTED)))
                                 newbo = panfrost_bo_create(screen, bo->size,
-                                                           flags);
+                                                           flags, "realloc resource busy");
 
                         if (newbo) {
                                 panfrost_bo_unreference(bo);
@@ -871,7 +872,7 @@ panfrost_resource_hint_layout(
         /* If we grew in size, reallocate the BO */
         if (new_size > rsrc->bo->size) {
                 panfrost_bo_unreference(rsrc->bo);
-                rsrc->bo = panfrost_bo_create(screen, new_size, PAN_BO_DELAY_MMAP);
+                rsrc->bo = panfrost_bo_create(screen, new_size, PAN_BO_DELAY_MMAP, "realloc resource size changed");
         }
 }
 

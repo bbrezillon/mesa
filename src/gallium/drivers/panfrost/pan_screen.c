@@ -550,6 +550,16 @@ panfrost_destroy_screen(struct pipe_screen *pscreen)
         pthread_mutex_destroy(&screen->bo_cache.lock);
         pthread_mutex_destroy(&screen->active_bos_lock);
         drmFreeVersion(screen->kernel_version);
+
+	list_for_each_entry_safe(struct panfrost_bo, entry, &screen->alloc_bos, alloc_link) {
+		if (entry->rsc)
+			printf("%s:%i BO %p label %s flags %x res %p leaked (refcount %d)\n", __func__, __LINE__, entry, entry->label, entry->flags,
+			       entry->rsc, p_atomic_read(&entry->rsc->reference.count));
+		else
+			printf("%s:%i BO %p label %s flags %x leaked\n", __func__, __LINE__, entry, entry->label, entry->flags);
+
+	}
+
         ralloc_free(screen);
 }
 
@@ -758,6 +768,8 @@ panfrost_create_screen(int fd, struct renderonly *ro)
         list_inithead(&screen->bo_cache.lru);
         for (unsigned i = 0; i < ARRAY_SIZE(screen->bo_cache.buckets); ++i)
                 list_inithead(&screen->bo_cache.buckets[i]);
+
+        list_inithead(&screen->alloc_bos);
 
         if (pan_debug & PAN_DBG_TRACE)
                 pandecode_initialize();

@@ -105,6 +105,14 @@ struct panfrost_screen {
 
                 struct list_head buckets[NR_BO_CACHE_BUCKETS];
         } bo_cache;
+
+	struct list_head alloc_bos;
+        size_t bo_allocated_size;
+	unsigned int allocated_bos;
+        size_t bo_cache_size;
+	unsigned int cached_bos;
+        size_t bo_imported_size;
+	unsigned int imported_bos;
 };
 
 static inline struct panfrost_screen *

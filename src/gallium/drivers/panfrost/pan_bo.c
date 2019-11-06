@@ -57,7 +57,7 @@
 
 static struct panfrost_bo *
 panfrost_bo_alloc(struct panfrost_screen *screen, size_t size,
-                  uint32_t flags)
+                  uint32_t flags, const char *label)
 {
         struct drm_panfrost_create_bo create_bo = { .size = size };
         struct panfrost_bo *bo;
@@ -82,8 +82,14 @@ panfrost_bo_alloc(struct panfrost_screen *screen, size_t size,
         bo->size = create_bo.size;
         bo->gpu = create_bo.offset;
         bo->gem_handle = create_bo.handle;
-        bo->flags = flags;
+        bo->flags = flags | PAN_BO_ALLOCATED;
         bo->screen = screen;
+	bo->label = label;
+	screen->bo_allocated_size += bo->size;
+	screen->allocated_bos++;
+        list_addtail(&bo->alloc_link, &screen->alloc_bos);
+	printf("%s:%i allocated BOs %d cached BOs %d imported BOs %d \n", __func__, __LINE__, screen->allocated_bos, screen->cached_bos, screen->imported_bos);
+//	printf("%s:%i BO %p label %s\n", __func__, __LINE__, bo, label);
         return bo;
 }
 
@@ -99,6 +105,18 @@ panfrost_bo_free(struct panfrost_bo *bo)
                 assert(0);
         }
 
+	bo->screen->bo_allocated_size -= bo->size;
+	if (bo->flags & PAN_BO_IMPORTED)
+		bo->screen->imported_bos--;
+
+	if (bo->flags & PAN_BO_ALLOCATED)
+		bo->screen->allocated_bos--;
+
+//	printf("%s:%i\n", __func__, __LINE__);
+        list_del(&bo->alloc_link);
+//	printf("%s:%i\n", __func__, __LINE__);
+	printf("%s:%i allocated BOs %d cached BOs %d imported BOs %d \n", __func__, __LINE__, bo->screen->allocated_bos, bo->screen->cached_bos, bo->screen->imported_bos);
+//	printf("%s:%i BO %p label %s\n", __func__, __LINE__, bo, bo->label ? : "NULL");
         ralloc_free(bo);
 }
 
@@ -205,7 +223,7 @@ panfrost_bo_cache_fetch(struct panfrost_screen *screen,
         /* Iterate the bucket looking for something suitable */
         list_for_each_entry_safe(struct panfrost_bo, entry, bucket,
                                  bucket_link) {
-                if (entry->size < size || entry->flags != flags)
+                if (entry->size < size || (entry->flags & ~PAN_BO_ALLOCATED) != flags)
                         continue;
 
                 if (!panfrost_bo_wait(entry, dontwait ? 0 : INT64_MAX,
@@ -221,6 +239,8 @@ panfrost_bo_cache_fetch(struct panfrost_screen *screen,
                 /* This one works, splice it out of the cache */
                 list_del(&entry->bucket_link);
                 list_del(&entry->lru_link);
+		screen->bo_cache_size -= entry->size;
+		screen->cached_bos--;
 
                 ret = drmIoctl(screen->fd, DRM_IOCTL_PANFROST_MADVISE, &madv);
                 if (!ret && !madv.retained) {
@@ -229,6 +249,7 @@ panfrost_bo_cache_fetch(struct panfrost_screen *screen,
                 }
                 /* Let's go! */
                 bo = entry;
+		printf("%s:%i allocated BOs %d cached BOs %d imported BOs %d \n", __func__, __LINE__, screen->allocated_bos, screen->cached_bos, screen->imported_bos);
                 break;
         }
         pthread_mutex_unlock(&screen->bo_cache.lock);
@@ -285,6 +306,9 @@ panfrost_bo_cache_put(struct panfrost_bo *bo)
 
         /* Add us to the bucket */
         list_addtail(&bo->bucket_link, bucket);
+	screen->bo_cache_size += bo->size;
+	screen->cached_bos++;
+	printf("%s:%i allocated BOs %d cached BOs %d imported BOs %d \n", __func__, __LINE__, screen->allocated_bos, screen->cached_bos, screen->imported_bos);
 
         /* Add us to the LRU list and update the last_used field. */
         list_addtail(&bo->lru_link, &screen->bo_cache.lru);
@@ -318,6 +342,7 @@ panfrost_bo_cache_evict_all(
                                          bucket_link) {
                         list_del(&entry->bucket_link);
                         list_del(&entry->lru_link);
+			screen->cached_bos--;
                         panfrost_bo_free(entry);
                 }
         }
@@ -367,7 +392,7 @@ panfrost_bo_munmap(struct panfrost_bo *bo)
 
 struct panfrost_bo *
 panfrost_bo_create(struct panfrost_screen *screen, size_t size,
-                   uint32_t flags)
+                   uint32_t flags, const char *label)
 {
         struct panfrost_bo *bo;
 
@@ -390,9 +415,15 @@ panfrost_bo_create(struct panfrost_screen *screen, size_t size,
          */
         bo = panfrost_bo_cache_fetch(screen, size, flags, true);
         if (!bo)
-                bo = panfrost_bo_alloc(screen, size, flags);
-        if (!bo)
+                bo = panfrost_bo_alloc(screen, size, flags, label);
+	else
+		bo->label = label;
+
+        if (!bo) {
                 bo = panfrost_bo_cache_fetch(screen, size, flags, false);
+		if (bo)
+			bo->label = label;
+	}
 
         if (!bo)
                 fprintf(stderr, "BO creation failed\n");
@@ -488,6 +519,11 @@ panfrost_bo_import(struct panfrost_screen *screen, int fd)
                 pipe_reference_init(&newbo->reference, 1);
                 // TODO map and unmap on demand?
                 panfrost_bo_mmap(newbo);
+		screen->bo_allocated_size += bo->size;
+		screen->imported_bos++;
+		newbo->label = "imported";
+		list_inithead(&newbo->alloc_link);
+//		printf("%s:%i allocated BOs %d cached BOs %d imported BOs %d \n", __func__, __LINE__, screen->allocated_bos, screen->cached_bos, screen->imported_bos);
         } else {
                 ralloc_free(newbo);
                 /* !pipe_is_referenced(&bo->reference) can happen if the BO

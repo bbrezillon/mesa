@@ -2494,7 +2494,7 @@ panfrost_begin_query(struct pipe_context *pipe, struct pipe_query *q)
                 if (!query->bo) {
                         query->bo = panfrost_bo_create(
                                         pan_screen(ctx->base.screen),
-                                        sizeof(unsigned), 0);
+                                        sizeof(unsigned), 0, "query");
                 }
 
                 unsigned *result = (unsigned *)query->bo->cpu;

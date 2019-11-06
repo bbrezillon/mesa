@@ -62,6 +62,8 @@ struct panfrost_screen;
 /* BO has been exported */
 #define PAN_BO_EXPORTED           (1 << 7)
 
+#define PAN_BO_ALLOCATED	  (1 << 8)
+
 /* GPU access flags */
 
 /* BO is either shared (can be accessed by more than one GPU batch) or private
@@ -114,6 +116,10 @@ struct panfrost_bo {
          * when the BO is idle.
          */
         uint32_t gpu_access;
+
+	struct list_head alloc_link;
+	const char *label;
+	struct pipe_resource *rsc;
 };
 
 /* If a BO is accessed for a particular shader stage, will it be in the primary
@@ -142,7 +148,7 @@ void
 panfrost_bo_unreference(struct panfrost_bo *bo);
 struct panfrost_bo *
 panfrost_bo_create(struct panfrost_screen *screen, size_t size,
-                   uint32_t flags);
+                   uint32_t flags, const char *label);
 void
 panfrost_bo_mmap(struct panfrost_bo *bo);
 struct panfrost_bo *
